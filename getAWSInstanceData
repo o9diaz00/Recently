@@ -1,0 +1,44 @@
+#! /bin/bash
+
+# This script was written for use at a place of employment.  Therefore specific information regarding that company's details will be removed. #
+
+## Set up git info
+cd /home/ottis/Infrastructure/Instance;
+git config user.email "odiaz@REMOVED";
+git config user.name "Ottis Diaz";
+git remote set-url origin https://odiaz:REMOVED@REMOVED;
+git pull;
+
+getData()
+{
+  if [[ $1 =~ "eu-west-1" ]]; then
+    REGION="REMOVED";
+  else
+    REGION="REMOVED";
+  fi
+
+  DIR="/home/ottis/Infrastructure/Instance/$REGION";
+
+  if [[ ! -d $DIR ]]; then
+    mkdir -p $DIR;
+  fi
+
+  for list in $(aws ec2 describe-instances --region $1 --instance-ids --query "Reservations[].Instances[].InstanceId[]" --output text | sed -e 's/\t/\n/g'); do
+    aws ec2 describe-instances --region $1 --instance-ids $list --output text > $DIR/$list;
+  done;
+
+  cd $DIR;
+  for file in $(find . -type f); do
+    name=$(grep -iP "tags\tname" $file | sed -e 's/\t/|/g' | cut -d'|' -f3 | tr ' ' '_'); 
+    mv $file $name 2>/dev/null;
+  done;
+}
+
+getData eu-west-1;
+getData us-east-1;
+
+## Add these files to git
+cd /home/ottis/Infrastructure/Instance;
+git add *;
+git commit -a -m "Uploaded Instance Data";
+git push -u origin master;
