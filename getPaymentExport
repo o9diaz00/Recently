@@ -1,0 +1,105 @@
+#! /bin/bash
+
+## This is a script written for a particular client, therefore some data will be removed but the gist of the script remains intact ##
+
+##---------##
+## UPDATES ##
+##--------------------------------------------------------------------------------------------------------------------------------------------
+# [2019-11-19]:
+#  - Added an scp portion that'll automatically export the files over to the [REMOVED] server in the [REMOVED] directory
+#  - This also removes the file off this server (if it has completed scping over to the remote server)
+# [2019-09-06]:
+#  - Script now saves the file with an appropriate name instead of the mechanism it'd use before where it retained the name but added .bak
+#  - Script also deletes the initial, RAW DB export created file, and only retains the formatted file
+##--------------------------------------------------------------------------------------------------------------------------------------------
+
+## Usage Example:	./getPaymentExport 2019-09-03
+
+## These variables set up the DB Connection ##
+PORT=[REMOVED];
+USER=[REMOVED];
+NAME=[REMOVED];
+
+## These are my time measurements ##
+DATE=$1;
+
+## Get the raw data from the DB as needed ##
+export()
+{
+  TYPE=$1;
+  FILE="/tmp/export/payments/${DATE}-${TYPE}-payments.csv";
+
+  mkdir -pv /tmp/export/payments/;
+  echo -e "Exporting ${TYPE} payments for ${DATE}...";
+  QUERY="\copy (SELECT * FROM [REMOVED] WHERE [REMOVED] LIKE '%$TYPE%' AND payment_date BETWEEN '$DATE 00:00:00' AND '$DATE 23:59:59') TO '${FILE' DELIMITER ',' CSV HEADER";
+  $(psql -U $USER -p $PORT -d $NAME -t -c "$QUERY") 2>/dev/null;
+  echo "Finished grabbing ${TYPE} payments for ${DATE}!"
+
+  COUNT=$(wc -l $FILE);
+  doSort $FILE $COUNT;
+}
+
+## This here formats and creates the new file w/ the format that [REMOVED] is accustomed to receiving ##
+doSort()
+{
+  COUNT=2;
+  TIME=$(date +000%H%M%S);
+  DAY=$(echo "$(date -d "$DATE +1 day" +%Y%m%d) ${TIME}");
+  SAVE=$(echo ${1} | tr '[A-Z]' '[a-z]' | cut -d'-' -f4);
+  SAVE=$(echo "${SAVE}-payments-${DAY}.csv");
+  F="/tmp/export/payments/${SAVE}";
+
+  echo "Reformatting and saving file to ${F}...";
+
+  echo "Business Unit,Card Amount,Card Exp,Card number,Account Number,[REMOVED] Final Status,[REMOVED] PaymentID,[REMOVED] Account,[REMOVED] AuthCode,[REMOVED] ErrDetails,[REMOVED] Final Status,[REMOVED] merrMsg,[REMOVED] OrderId,[REMOVED] Respcode,Payment date,[REMOVED]Id,[REMOVED] Status Code,[REMOVED] Status Message" > $F;
+
+  while [[ $COUNT -le $2 ]]; do
+    BUSINESS_UNIT=$(head -n$COUNT $1 | tail -1 | grep -oP "(?<=recon_bu\"\":\"\")..");
+    AMOUNT=$(head -n$COUNT $1 | tail -1 | cut -d',' -f2);
+    EXPDATE=$(head -n$COUNT $1 | tail -1 | grep -oP "(?<=recon_payCardExpiryDate\"\":\"\")....");
+    if [[ ! -z $EXPDATE ]]; then
+      EXPDATE=$(echo ${EXPDATE:0:2}/${EXPDATE:2:4});
+    fi
+    CARDNUM=$(head -n$COUNT $1 | tail -1 | grep -oP "(?<=recon_masked_card_number\"\":\"\")[0-9]+\*+[0-9]+");
+    ACCOUNT=$(head -n$COUNT $1 | tail -1 | grep -oP "(?<=accountNumber\"\":\"\")[0-9]+");
+    REMOVED_FINAL_STATUS=$(head -n$COUNT $1 | tail -1 | grep -oP "(?<=recon_REMOVED_Final_Status\"\":\"\")[aA-zZ]+");
+    REMOVED_PAYMENT_ID=$(head -n$COUNT $1 | tail -1 | grep -oP "(?<=recon_REMOVED_Payment_ID\"\":)[0-9]+");
+    PUBLISHER_NAME=$(head -n$COUNT $1 | tail -1 | grep -oP "(?<=recon_publisher_name\"\":\"\")[aA-zZ]+");
+    AUTH_CODE=$(head -n$COUNT $1 | tail -1 | cut -d ',' -f5);
+    ERR_DETAILS=$(head -n$COUNT $1 | tail -1 | grep -oP "(?<=recon_Errdetails\"\":)[aA-zZ]+");
+    if [[ $ERR_DETAILS == "null" ]]; then
+      ERR_DETAILS="";
+    fi
+    FINAL_STATUS=$(head -n$COUNT $1 | tail -1 | grep -oP "(?<=recon_FinalStatus\"\":\"\")[aA-zZ]+");
+    MERRMSG=$(head -n$COUNT $1 | tail -1 | grep -oP "(?<=recon_MErrMsg\"\":\"\")[0-9]+: [aA-zZ]+");
+    ORDERID=$(head -n$COUNT $1 | tail -1 | cut -d ',' -f6);
+    RESPCODE=$(head -n$COUNT $1 | tail -1 | cut -d ',' -f7);
+    PAYMENTDATE=$(head -n$COUNT $1 | tail -1 | cut -d ',' -f4 | tr -d '\-\:\ ');
+    PAYMENTDATE=${PAYMENTDATE%????};
+    REMOVEDID=$(head -n$COUNT $1 | tail -1 | cut -d ',' -f1);
+    QUERY="SELECT [REMOVED] FROM [REMOVED] WHERE [REMOVED]='$REMOVEDID';";
+    REMOVEDID=$(psql -U $USER -p $PORT -d $NAME -t -c "$QUERY");
+    REMOVEDID=$(echo $REMOVEDID | tr -d ' ');
+    REMOVED_CODE=$(head -n$COUNT $1 | tail -1 | grep -oP "(?<=responseCode\"\":\"\")[0-9]+");
+    REMOVED_MSG=$(head -n$COUNT $1 | tail -1 | grep -oP "(?<=message\"\":\"\").*\"\"," | cut -d ',' -f1 | tr -d '\"');
+
+    echo "$BUSINESS_UNIT,$AMOUNT,$EXPDATE,$CARDNUM,$ACCOUNT,$REMOVED_FINAL_STATUS,$REMOVED_PAYMENT_ID,$PUBLISHER_NAME,$AUTH_CODE,$ERR_DETAILS,$FINAL_STATUS,$MERRMSG,$ORDERID,$RESPCODE,$PAYMENTDATE,$REMOVEDID,$REMOVED_CODE,$REMOVED_MSG" >> $F;
+  done;
+
+  rm -rf ${1} && echo "Save complete!";
+
+  transfer;
+}
+
+## This here sftps the file onto the necessary server ##
+transfer()
+{
+  HOST=[REMOVED];
+
+  echo "SCPing files over to $HOST...";
+  sshpass -p "$(cat [REMOVED])" scp /tmp/export/payments/*-payments-*.csv [REMOVED]@$HOST:[REMOVED] && rm -rf /tmp/export/payments/* && echo -e "SCP complete!\n";
+}
+
+## There are only 2 types of payments we're looking for ##
+export [REMOVED];
+export [REMOVED];
