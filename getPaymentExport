@@ -31,7 +31,7 @@ export()
 
   mkdir -pv /tmp/export/payments/;
   echo -e "Exporting ${TYPE} payments for ${DATE}...";
-  QUERY="\copy (SELECT * FROM [REMOVED] WHERE [REMOVED] LIKE '%$TYPE%' AND payment_date BETWEEN '$DATE 00:00:00' AND '$DATE 23:59:59') TO '${FILE' DELIMITER ',' CSV HEADER";
+  QUERY="\copy (SELECT * FROM [REMOVED] WHERE [REMOVED] LIKE '%$TYPE%' AND payment_date BETWEEN '$DATE 00:00:00' AND '$DATE 23:59:59') TO '${FILE}' DELIMITER ',' CSV HEADER";
   $(psql -U $USER -p $PORT -d $NAME -t -c "$QUERY") 2>/dev/null;
   echo "Finished grabbing ${TYPE} payments for ${DATE}!"
 
@@ -91,7 +91,7 @@ doSort()
   transfer;
 }
 
-## This here sftps the file onto the necessary server ##
+## This here SCPs the file onto the necessary server ##
 transfer()
 {
   HOST=[REMOVED];
