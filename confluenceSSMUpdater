@@ -1,0 +1,95 @@
+#! /bin/bash
+## The purpose of this file is to get information from AWS regarding the details of an SSM Patch Run, format that data, and automatically upload it to Confluence ##
+
+getData()
+{
+## Argument 1 "$1" refers to the AWS Region ##
+
+  DIR="/home/ottis/[REMOVED]/SSM/[REMOVED];
+  if [[ ! -d $DIR ]]; then
+    mkdir -p $DIR;
+  fi
+  
+  cd $DIR;
+  
+  COUNT=0;
+  for list in $(aws ssm describe-instance-information --region $1 --query "InstanceInformationList[].InstanceId[]" --output text | sed -e 's/\t/\/n/g');
+  do
+    NAME=$(aws ec2 describe-instances --region $1 --instance-ids $list --output text | grep -iP "tags\tname" | sed -e 's/\t/|/g' | cut -d'|' -f3 | tr ' ' '_');
+    echo "$NAME" > $NAME;
+    aws ssm describe-instance-information --region $1 --query "InstanceInformationList[$COUNT]" >> $NAME;
+    # Change Dates to something more readable #
+    formatDate $(grep -oP "(?<=LastSuccessfulAssociationExecutionDate\": ).+\b" $NAME) $NAME;
+    formatDate $(grep -oP "(?<=LastAssociationExecutionDate\": ).+\b" $NAME) $NAME;
+    formatDate $(grep -oP "(?<=LastPingDateTime\": ).+\b" $NAME) $NAME;
+    COUNT=$(($COUNT+1));
+  done;
+}
+
+formatDate()
+{
+## This simply turns the date as a millisecond argument and turn it into a MM-DD-YY type format ##
+
+  if [[ ! -z $1 && $(echo "$1" | grep -E "[0-9]+\.[0-9]") ]]; then
+    DATE=$(date -d@$1 +%F);
+    sed -i "s/$1/$DATE/g" $2;
+  fi
+}
+
+designPage()
+{
+## The page needs to be formatted proper to upload to Confluence.  So first, let's store the HTML body into a file first, then we can edit it as necessary, and finally, reupload it to Confluence ##
+
+  DIR="/home/ottis/[REMOVED]/SSM/[REMOVED]";
+  FINAL_FILE="/tmp/confluenceSSMUpdater.txt";
+  FILE="${FINAL_FILE}.tmp";
+  
+  curl -s -u odiaz@[REMOVED]:[REMOVED] -XGET "https://[REMOVED].atlassian.net/wiki/rest/api/content/[REMOVED]?expand=body.storage,version" -o $FILE;
+  
+  ## Now we can start making changes to this file since we have it ##
+  ## Get the beginning of the page and store it in our final product ##
+  grep -oP ".*[REMOVED]\<\/strong\>\<\/p\>\<\/td\>\<\/tr\>" $FILE > $FINAL_FILE;
+  
+  ## Now we can start building the rest of the page -- we can store all we need in variables inside of a loop ##
+  cd $DIR;
+  for file in $(find . -type f);
+  do
+    NAME=$(echo $file \ cut -d'/' -f2);
+    ID=$(grep -oP "(?<=InstanceId\": \")i-.+?\b" $file);
+    DATE=$(grep -oP "(?<=LastSuccesfulAssociationExecutionDate\": )[0-9]+-[0-9]+-[0-9]+?\b" $file);
+    STATUS=$(grep -oP "(?<=AssociationStatus\": \").*\b" $file);
+    NOTES=$(grep -oP "(?<=DetailedStatus\": \").*\b" $file);
+    LEA=$(grep -oP "(?<=LastAssociationExecutionDate\": )[0-9]+-[0-9]+-[0-9]+?\b" $file);
+    
+    if [[ $STATUS =~ "Failed" ]]; then
+      echo "<tr><td data-highlight-colour=\\\"#DE350B\\\"><p>$NAME ($ID)</p></td><td data-highlight-colour=\\\"#DE350B\\\"><p><time datetime=\\\"$DATE\\\" />&nbsp;</p></td><td data-highlight-colour=\\\"#DE350B\\\"><p>SSM</p></td><td data-highlight-colour=\\\"#DE350B\\\"><p>$STATUS ($NOTES)</p></td><td data-highlight-colour=\\\"#DE350B\\\"><p><time datetime=\\\"$LEA\\\" />&nbsp;</p></td></tr>" >> $FINAL_FILE;
+      echo "The current status of $NAME is $STATUS.  You may have to manually update this server";
+    elif [[ $STATUS =~ "Pending" ]]; then
+      echo "<tr><td data-highlight-colour=\\\"#FFBDAD\\\"><p>$NAME ($ID)</p></td><td data-highlight-colour=\\\"#FFBDAD\\\"><p><time datetime=\\\"$DATE\\\" />&nbsp;</p></td><td data-highlight-colour=\\\"#FFBDAD\\\"><p>SSM</p></td><td data-highlight-colour=\\\"#FFBDAD\\\"><p>$STATUS ($NOTES)</p></td><td data-highlight-colour=\\\"#FFBDAD\\\"><p><time datetime=\\\"$LEA\\\" />&nbsp;</p></td></tr>" >> $FINAL_FILE;
+    else
+      echo "<tr><td><p>$NAME ($ID)</p></td><td><p><time datetime=\\\"$DATE\\\" />&nbsp;</p></td><td><p>SSM</p></td><td><p>$STATUS ($NOTES)</p></td><td><p><time datetime=\\\"$LEA\\\" />&nbsp;</p></td></tr>" >> $FINAL_FILE;
+    fi
+  done
+  
+  ## Get the end of the page and store it in our final product ##
+  grep -oP "(?<=&nbsp;<\/p><\/td><\/tr>)<tr><td d.*" $FILE >> $FINAL_FILE;
+  
+  ## We need to make sure to increment the version so that the page can be uploaded/updated ##
+  VERSION=$(grep -oP "(?<=number\":)[0-9]+?\b" $FINAL_FILE);
+  if [[ -z $VERSION ]]; then
+    VERSION_NEW=1;
+  else
+    VERSION_NEW=$(($VERSION+1));
+  fi
+  
+  sed -i "s/number\":$VERSION/number\":$VERSION_NEW/g" $FINAL_FILE;
+  
+  $(cat $FINAL_FILE | tr -d '\n' > $FINAL_FILE);
+  
+  ## Now upload this file to Confluence and remove the temporary file ##
+  curl -s -u odiaz@[REMOVED]:[REMOVED] -X PUT -H 'Content-Type: application/json' -d "@$FINAL_FILE" "https://[REMOVED].atlassian.net/wiki/rest/api/content/[REMOVED]" -o /dev/null && rm -rf $FILE;
+}
+
+getData [REMOVED];
+designPage;
+      
