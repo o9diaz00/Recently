@@ -1,0 +1,39 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Creates the *** IAM User w/ Programmatic Keys Stored in Secrets Manager'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: 'dev'
+    Description: 'The tag to include on all created resources and to tie stacks together for easier referencing. Example: dev, qa, prod'
+
+Resources:
+  ***User:
+    Type: 'AWS::IAM::User'
+    Properties:
+      UserName:
+        Fn::Join: ['-', [***, !Ref Environment]]
+      Policies:
+        - PolicyName:
+            Fn::Join: ['-', [***, !Ref Environment]]
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'sms-voice:*'
+                  - 'sns:*'
+                Resource: '*'
+
+  ***UserCredentials:
+    Type: 'AWS::IAM::AccessKey'
+    Properties:
+      Status: Active
+      UserName: !Ref ***User
+
+  store***Credentials:
+    Type: 'AWS::SecretsManager::Secret'
+    Properties:
+      Name: !Ref ***User
+      Description: !Sub 'Access and Secret Keys for ${***User} programmatic access'
+      SecretString: !Sub '"ACCESS_KEY":"${***UserCredentials}"     "SECRET_KEY":"${***UserCredentials.SecretAccessKey}"'
