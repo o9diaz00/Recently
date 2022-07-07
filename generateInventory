@@ -1,0 +1,73 @@
+#! /bin/bash
+
+## This script goes through all of our AWS accounts (well the ones I have stored in my local aws config file) and generates a dynamic ##
+## Ansible inventory list based off the running servers.  It also then formats the list in a way that I like it (if expressed) ##
+
+# GLOBAL VARIABLES #
+FILE=/tmp/inventory.ini # This is our permanent inventory file
+TEMP_FILE=/tmp/temp_$(openssl rand -hex 8).txt # This is our temporary inventory file that gets deleted
+FORMAT=false; # This determines whether or not we apply my kind of formatting to the inventory file
+
+# FUNCTIONS #
+# help() --> standard help information #
+help()
+{
+echo "Usage: generateInventory [-f|--format] [-h|--help]";
+echo -e "\t-f\tDetermines whether or not to apply my preferred formatting to the inventory.ini file";
+echo -e "\t-h\tPrint this help.";
+}
+
+# format() --> I thought the easiest/quickest way of fomartting would just be to store all the data into a temporary file #
+#              and then perform greps to get the data and store it into a new, permanent file #
+format()
+{
+echo " - Formatting file...";
+if [[ ! -z $(grep "Web" $TEMP_FILE) ]]; then
+  echo -e "\n[${PROFILE}Web]" >> $FILE;
+  grep "Web" $TEMP_FILE >> $FILE;
+fi
+if [[ ! -z $(grep "Zuul" $TEMP_FILE) ]]; then
+  echo -e "\n[${PROFILE}Zuul]" >> $FILE;
+  grep "Zuul" $TEMP_FILE >> $FILE;
+fi
+if [[ ! -z $(grep "Backend" $TEMP_FILE) ]]; then
+  echo -e "\n[${PROFILE}Backend]" >> $FILE;
+  grep "Backend" $TEMP_FILE >> $FILE;
+fi
+if [[ ! -z $(grep "Node" $TEMP_FILE) ]]; then
+  echo -e "\n[${PROFILE}Node]" >> $FILE;
+  grep "Node" $TEMP_FILE >> $FILE;
+fi
+if [[ ! -z $(grep -vE "Backend|Web|Zuul|Node|\[$PROFILE\]|^[[:space:]]*$" $TEMP_FILE) ]]; then
+  echo -e "\n[${PROFILE}Other]" >> $FILE;
+  grep -vE "Backend|Web|Zuul|Node|\[$PROFILE\]|^[[:space:]]*$" $TEMP_FILE >> $FILE;
+  echo "" >> $FILE;
+fi
+}
+
+# mainFunction() --> This is just a single AWSCLI ec2 describe instances command with some filters and querying, performed within loops #
+#                    to get per account and per region.  This uses the profile names that I use in my aws config file for sso #
+mainFunction()
+{
+echo "Creating inventory file...";
+for PROFILE in $(grep -E "^\[profile .+\]" ~/.aws/config | awk '{print $2}' | tr -d ']'); do
+  [[ $FORMAT == false ]] && echo -e "\n[$PROFILE]" > $TEMP_FILE || echo "" > $TEMP_FILE;
+  echo -e "\nChecking AWS profile $PROFILE";
+  for REGION in {"us-east-1","ap-northeast-1","ap-southeast-2","eu-west-2"}; do
+    echo -n " - Checking AWS region $REGION...";
+    aws ec2 describe-instances --profile=$PROFILE --region=$REGION --filter "Name=instance-state-name,Values=running" --query="Reservations[].Instances[].[Tags[?Key=='Name'].Value|[0], Placement.AvailabilityZone,InstanceId,PrivateIpAddress]" --output=text | sed "s/ /-/g" | awk '{print $1"-"$2"-"$3" ansible_host="$4}' >> $TEMP_FILE && echo "DONE!";
+  done;
+[[ $FORMAT == true ]] && format || cat $TEMP_FILE >> $FILE;
+done && rm -rf $TEMP_FILE;
+echo "Your inventory file can be found at the following location: [ $FILE ]";
+}
+
+while getopts ":h:f" opt; do
+  case $opt in
+    h | -help) help; exit 0;;
+    f | -format) FORMAT=true;;
+    \?) help; exit 1;;
+  esac
+done
+
+mainFunction;
